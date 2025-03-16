@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Dimensions, Alert, Text, TouchableOpacity, ScrollView } from 'react-native';
-import MapView, { Marker, Region, LatLng, PROVIDER_GOOGLE, Callout } from 'react-native-maps';
+import { View, StyleSheet, Dimensions, Alert, Text, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import MapView, { Marker, Region, LatLng, PROVIDER_GOOGLE, Callout, Circle, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import Animated, {
@@ -14,6 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { EmergencyResponse } from '../utils/api';
 import { getAllEmergencies } from '../utils/api';
+import { socketManager } from '../utils/socket';
 
 interface Emergency {
   id: string;
@@ -23,6 +24,12 @@ interface Emergency {
   type: 'medical' | 'fire' | 'police';
   distance: number;
   confirmed?: boolean;
+}
+
+interface Hotspot {
+  center: LatLng;
+  count: number;
+  emergencies: EmergencyResponse[];
 }
 
 // Calculate distance between two coordinates in meters
@@ -263,27 +270,107 @@ const parseLocationString = (locationString: string): LatLng => {
   }
 };
 
+// Add this function to detect hotspots
+const detectHotspots = (emergencies: EmergencyResponse[], radius: number = 300): Hotspot[] => {
+  const hotspots: Hotspot[] = [];
+  const processed = new Set<string>();
+
+  emergencies.forEach(emergency => {
+    if (processed.has(emergency.id)) return;
+    
+    const location = parseLocationString(emergency.location);
+    const nearbyEmergencies = emergencies.filter(e => {
+      if (processed.has(e.id)) return false;
+      const eLoc = parseLocationString(e.location);
+      return calculateDistance(location, eLoc) <= radius;
+    });
+
+    if (nearbyEmergencies.length >= 2) { // Minimum 2 emergencies to form a hotspot
+      // Calculate center point of all emergencies in cluster
+      const center = nearbyEmergencies.reduce((acc, e) => {
+        const loc = parseLocationString(e.location);
+        return {
+          latitude: acc.latitude + loc.latitude / nearbyEmergencies.length,
+          longitude: acc.longitude + loc.longitude / nearbyEmergencies.length,
+        };
+      }, { latitude: 0, longitude: 0 });
+
+      hotspots.push({
+        center,
+        count: nearbyEmergencies.length,
+        emergencies: nearbyEmergencies,
+      });
+
+      // Mark all emergencies in this hotspot as processed
+      nearbyEmergencies.forEach(e => processed.add(e.id));
+    }
+  });
+
+  return hotspots;
+};
+
+// Add the HotspotCircle component
+interface HotspotCircleProps {
+  hotspot: Hotspot;
+  radius: number;
+}
+
+const HotspotCircle: React.FC<HotspotCircleProps> = ({ hotspot, radius }) => {
+  const opacity = Math.min(0.35, 0.15 + (hotspot.count * 0.05)); // Increase opacity with more emergencies
+  
+  return (
+    <Circle
+      center={hotspot.center}
+      radius={radius}
+      fillColor={`rgba(255, 0, 0, ${opacity})`}
+      strokeColor="rgba(255, 0, 0, 0.5)"
+      strokeWidth={1}
+    />
+  );
+};
+
 export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [emergencies, setEmergencies] = useState<EmergencyResponse[]>([]);
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
 
-  const fetchEmergencies = async (): Promise<EmergencyResponse[]> => {
-    const emergencies = await getAllEmergencies();
-    return emergencies;
-  };
+  // Initialize socket connection
+  useEffect(() => {
+    const socket = socketManager.connect();
 
-  const handleConfirmEmergency = (emergencyId: string) => {
-    setEmergencies(prev => 
-      prev.map(emergency => 
-        emergency.id === emergencyId 
-          ? { ...emergency, confirmed: true }
-          : emergency
-      )
-    );
-  };
+    socket.on('newEmergency', (data: {data: EmergencyResponse}) => {
+      console.log('New emergency received:', data);
+      setEmergencies(prev => {
+        const exists = prev.some(e => e.id === data.data.id);
+        if (exists) return prev;
+        return [...prev, data.data];
+      });
 
+      if (location) {
+        const emergencyLocation = parseLocationString(data.data.location);
+        const userLocation = {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        };
+        const distance = calculateDistance(userLocation, emergencyLocation);
+        
+        if (distance <= 1000) {
+          Alert.alert(
+            'Nearby Emergency',
+            `A new ${data.data.type.toLowerCase()} emergency has been reported ${Math.round(distance)}m away from your location.`
+          );
+        }
+      }
+    });
+
+    return () => {
+      socketManager.disconnect();
+    };
+  }, [location]);
+
+  // Keep your existing useEffect for location and initial emergencies
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -297,8 +384,12 @@ export default function MapScreen() {
         const currentLocation = await Location.getCurrentPositionAsync({});
         setLocation(currentLocation);
         
-        const newEmergencies = await fetchEmergencies();
+        const newEmergencies = await getAllEmergencies();
         setEmergencies(newEmergencies);
+        
+        // Detect hotspots whenever emergencies update
+        const newHotspots = detectHotspots(newEmergencies);
+        setHotspots(newHotspots);
 
         mapRef.current?.animateToRegion({
           latitude: currentLocation.coords.latitude,
@@ -320,24 +411,40 @@ export default function MapScreen() {
     longitudeDelta: 0.005,
   };
 
+    function handleConfirmEmergency(emergencyId: string): void {
+        console.log('Emergency confirmed:', emergencyId);
+    }
+
   return (
     <View style={styles.container}>
       <MapView
         ref={mapRef}
         style={styles.map}
         initialRegion={initialRegion}
-        provider={PROVIDER_GOOGLE}
+        provider={Platform.select({
+          ios: PROVIDER_DEFAULT,  // Use Apple Maps on iOS
+          android: PROVIDER_GOOGLE // Use Google Maps on Android
+        })}
         showsUserLocation
         showsMyLocationButton
         showsCompass
         mapType="standard"
       >
+        {/* Render hotspots first so they appear under the markers */}
+        {hotspots.map((hotspot, index) => (
+          <HotspotCircle
+            key={`hotspot-${index}`}
+            hotspot={hotspot}
+            radius={100}
+          />
+        ))}
+        
         {emergencies.map((emergency) => (
           <AnimatedMarker
             key={emergency.id}
             coordinate={parseLocationString(emergency.location)}
             type={emergency.type}
-            title={emergency.user.name}
+            title={emergency.type}
             description={emergency.description}
           />
         ))}

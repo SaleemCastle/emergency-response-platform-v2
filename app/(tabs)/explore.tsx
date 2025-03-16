@@ -67,6 +67,7 @@ const AlertScreen = () => {
   const [waveformData, setWaveformData] = useState<number[]>(Array(NUM_BARS).fill(MIN_BAR_HEIGHT));
   const waveformAnims = useRef(Array(NUM_BARS).fill(0).map(() => new Animated.Value(MIN_BAR_HEIGHT))).current;
   const [location, setLocation] = useState<string>('Unknown location');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Animation values for option buttons
   const optionAnims = {
@@ -206,7 +207,7 @@ const AlertScreen = () => {
   };
 
   const handleTextSubmit = async () => {
-    if (emergencyText.trim()) {
+    if (emergencyText.trim() && !isSubmitting) {
       Alert.alert(
         'Confirm Emergency Report',
         'Are you sure you want to submit this emergency report?',
@@ -223,8 +224,11 @@ const AlertScreen = () => {
             text: 'Submit',
             style: 'destructive',
             onPress: async () => {
+              if (isSubmitting) return;
               try {
+                setIsSubmitting(true);
                 setIsButtonDisabled(true);
+
                 const emergency = await createEmergency({
                   type: 'TEXT',
                   location: location,
@@ -241,6 +245,8 @@ const AlertScreen = () => {
                 console.error('Failed to create emergency:', error);
                 Alert.alert('Error', 'Failed to report emergency. Please try again.');
                 setIsButtonDisabled(false);
+              } finally {
+                setIsSubmitting(false);
               }
             }
           }
@@ -296,7 +302,7 @@ const AlertScreen = () => {
   };
 
   const handleEmergencyPress = async (type: string) => {
-    if (isButtonDisabled) return;
+    if (isButtonDisabled || isSubmitting) return;
 
     try {
       if (location === 'Unknown location') {
@@ -321,8 +327,11 @@ const AlertScreen = () => {
               text: 'Report Emergency',
               style: 'destructive',
               onPress: async () => {
+                if (isSubmitting) return;
                 try {
+                  setIsSubmitting(true);
                   setIsButtonDisabled(true);
+                  
                   const emergency = await createEmergency({
                     type: type.toUpperCase(),
                     location: location,
@@ -337,6 +346,8 @@ const AlertScreen = () => {
                   console.error('Failed to create emergency:', error);
                   Alert.alert('Error', 'Failed to report emergency. Please try again.');
                   setIsButtonDisabled(false);
+                } finally {
+                  setIsSubmitting(false);
                 }
               }
             }
@@ -346,6 +357,7 @@ const AlertScreen = () => {
     } catch (error) {
       console.error('Error in handleEmergencyPress:', error);
       Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+      setIsSubmitting(false);
     }
   };
 
@@ -507,8 +519,11 @@ const AlertScreen = () => {
                   text: 'Submit',
                   style: 'destructive',
                   onPress: async () => {
+                    if (isSubmitting) return;
                     try {
+                      setIsSubmitting(true);
                       setIsButtonDisabled(true);
+                      
                       const emergency = await createEmergency({
                         type: 'VOICE',
                         location: location,
@@ -524,6 +539,8 @@ const AlertScreen = () => {
                       console.error('Failed to create emergency:', error);
                       Alert.alert('Error', 'Failed to report emergency. Please try again.');
                       setIsButtonDisabled(false);
+                    } finally {
+                      setIsSubmitting(false);
                     }
                   }
                 }
