@@ -94,6 +94,15 @@ export async function confirmEmergency(emergencyId: string) {
       throw new Error(errorData.error || 'Failed to confirm emergency');
     }
 
+    // store all confirmed emergencies in the local storage so we can only show the user the emergencies they have not confirmed
+
+    const confirmedEmergencies = await SecureStore.getItemAsync('confirmedEmergencies');
+    if (confirmedEmergencies) {
+      await SecureStore.setItemAsync('confirmedEmergencies', JSON.stringify([...confirmedEmergencies, emergencyId]));
+    } else {
+      await SecureStore.setItemAsync('confirmedEmergencies', JSON.stringify([emergencyId]));
+    }
+
     return await response.json();
   } catch (error) {
     console.error('Error confirming emergency:', error);
