@@ -614,7 +614,7 @@ const AlertScreen = () => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Emergency Response</Text>
+        <Text style={styles.title}>SafeZone</Text>
         <Text style={styles.subtitle}>Press the REPORT EMERGENCY button to report an emergency and Long press to choose report type</Text>
       </View>
       
