@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Dimensions, Alert, Text, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Dimensions, Alert, Text, TouchableOpacity, ScrollView } from 'react-native';
 import MapView, { Marker, Region, LatLng, PROVIDER_GOOGLE, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
@@ -12,6 +12,8 @@ import Animated, {
   withSpring,
   Layout,
 } from 'react-native-reanimated';
+import { EmergencyResponse } from '../utils/api';
+import { getAllEmergencies } from '../utils/api';
 
 interface Emergency {
   id: string;
@@ -77,12 +79,12 @@ const generateEmergencyData = (center: LatLng): Emergency[] => {
 };
 
 interface NearbyAlertsProps {
-  emergencies: Emergency[];
+  emergencies: EmergencyResponse[];
   userLocation: LatLng;
   onConfirm: (emergencyId: string) => void;
 }
 
-const getEmergencyIcon = (type: Emergency['type']) => {
+const getEmergencyIcon = (type: string) => {
   switch (type) {
     case 'medical':
       return <FontAwesome5 name="hospital-symbol" size={20} color="#FF0000" />;
@@ -91,28 +93,32 @@ const getEmergencyIcon = (type: Emergency['type']) => {
     case 'police':
       return <MaterialIcons name="local-police" size={24} color="#0066FF" />;
     default:
-      return null;
+      return <MaterialIcons name="emergency" size={24} color="#ed2d2d" />;
   }
 };
 
-const NearbyAlerts: React.FC<NearbyAlertsProps> = ({ emergencies, onConfirm }) => {
-  const nearbyEmergencies = emergencies.filter(e => e.distance <= 100 && !e.confirmed);
+const NearbyAlerts: React.FC<NearbyAlertsProps> = ({ emergencies, userLocation, onConfirm }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const contentHeight = useSharedValue('auto');
   const rotateAnimation = useSharedValue(0);
   
+  const rotateStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ rotate: `${rotateAnimation.value}deg` }],
+    };
+  });
+
+  const nearbyEmergencies = emergencies.filter(e => {
+    const emergencyLocation = parseLocationString(e.location);
+    return calculateDistance(userLocation, emergencyLocation) <= 100;
+  });
+
   if (nearbyEmergencies.length === 0) return null;
 
   const toggleMinimize = () => {
     setIsMinimized(!isMinimized);
     rotateAnimation.value = withSpring(isMinimized ? 0 : 180);
   };
-
-  const rotateStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ rotate: `${rotateAnimation.value}deg` }],
-    };
-  });
 
   return (
     <View style={styles.alertsContainer}>
@@ -128,16 +134,17 @@ const NearbyAlerts: React.FC<NearbyAlertsProps> = ({ emergencies, onConfirm }) =
         </TouchableOpacity>
       </View>
       <Animated.View layout={Layout}>
+        <ScrollView style={styles.scrollView}>
         {!isMinimized && nearbyEmergencies.map(emergency => (
           <View key={emergency.id} style={styles.alertItem}>
             <View style={styles.alertInfo}>
               <View style={styles.alertTitleContainer}>
                 {getEmergencyIcon(emergency.type)}
                 <Text style={[styles.alertTitle, { marginLeft: 8 }]}>
-                  {emergency.title.replace(emergency.type, '').trim()}
+                  {'Emergency'}
                 </Text>
               </View>
-              <Text style={styles.alertDistance}>{Math.round(emergency.distance)}m away</Text>
+              <Text style={styles.alertDistance}>{Math.round(calculateDistance(userLocation, parseLocationString(emergency.location)))}m away</Text>
             </View>
             <View style={styles.alertActions}>
               <TouchableOpacity
@@ -153,6 +160,7 @@ const NearbyAlerts: React.FC<NearbyAlertsProps> = ({ emergencies, onConfirm }) =
             </View>
           </View>
         ))}
+        </ScrollView>
       </Animated.View>
     </View>
   );
@@ -160,12 +168,12 @@ const NearbyAlerts: React.FC<NearbyAlertsProps> = ({ emergencies, onConfirm }) =
 
 interface AnimatedMarkerProps {
   coordinate: LatLng;
-  type: Emergency['type'];
+  type: string;
   title: string;
   description: string;
 }
 
-const getMarkerColor = (type: Emergency['type']): string => {
+const getMarkerColor = (type: string): string => {
   switch (type) {
     case 'medical':
       return '#FF0000'; // Red
@@ -240,11 +248,31 @@ const AnimatedMarker: React.FC<AnimatedMarkerProps> = ({ coordinate, type, title
   );
 };
 
+// Add this function before the MapScreen component
+const parseLocationString = (locationString: string): LatLng => {
+  try {
+    const location = JSON.parse(locationString);
+    return {
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude)
+    };
+  } catch (error) {
+    console.error('Error parsing location string:', error);
+    // Return a default location or handle the error as needed
+    return { latitude: 0, longitude: 0 };
+  }
+};
+
 export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [emergencies, setEmergencies] = useState<Emergency[]>([]);
+  const [emergencies, setEmergencies] = useState<EmergencyResponse[]>([]);
+
+  const fetchEmergencies = async (): Promise<EmergencyResponse[]> => {
+    const emergencies = await getAllEmergencies();
+    return emergencies;
+  };
 
   const handleConfirmEmergency = (emergencyId: string) => {
     setEmergencies(prev => 
@@ -269,10 +297,7 @@ export default function MapScreen() {
         const currentLocation = await Location.getCurrentPositionAsync({});
         setLocation(currentLocation);
         
-        const newEmergencies = generateEmergencyData({
-          latitude: currentLocation.coords.latitude,
-          longitude: currentLocation.coords.longitude,
-        });
+        const newEmergencies = await fetchEmergencies();
         setEmergencies(newEmergencies);
 
         mapRef.current?.animateToRegion({
@@ -310,9 +335,9 @@ export default function MapScreen() {
         {emergencies.map((emergency) => (
           <AnimatedMarker
             key={emergency.id}
-            coordinate={emergency.coordinate}
+            coordinate={parseLocationString(emergency.location)}
             type={emergency.type}
-            title={emergency.title}
+            title={emergency.user.name}
             description={emergency.description}
           />
         ))}
@@ -401,6 +426,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
     overflow: 'hidden',
+    maxHeight: 300,
   },
   alertsHeaderContainer: {
     flexDirection: 'row',
@@ -465,5 +491,8 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 12,
     fontWeight: '600',
+  },
+  scrollView: {
+    // paddingBottom: 20,
   },
 }); 

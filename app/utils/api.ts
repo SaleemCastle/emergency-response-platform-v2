@@ -7,6 +7,25 @@ export interface Emergency {
   photoUrl?: string;
 }
 
+export interface EmergencyResponse {
+  id: string;
+  userId: string;
+  type: string;
+  location: string;
+  description: string;
+  photoUrl?: string;
+  status: string;
+  timestamp: string;
+  user: User;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+}
+
 export async function createEmergency(emergency: Emergency) {
   try {
     const userId = await SecureStore.getItemAsync('userId');
@@ -33,6 +52,21 @@ export async function createEmergency(emergency: Emergency) {
     return await response.json();
   } catch (error) {
     console.error('Error creating emergency:', error);
+    throw error;
+  }
+}
+
+export async function getAllEmergencies(): Promise<EmergencyResponse[]> {
+  try {
+    const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/emergencies`);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch emergencies');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching emergencies:', error);
     throw error;
   }
 }
