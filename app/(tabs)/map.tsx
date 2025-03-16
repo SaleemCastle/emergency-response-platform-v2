@@ -1,0 +1,469 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, Dimensions, Alert, Text, TouchableOpacity } from 'react-native';
+import MapView, { Marker, Region, LatLng, PROVIDER_GOOGLE, Callout } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import Animated, {
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  useSharedValue,
+  withSpring,
+  Layout,
+} from 'react-native-reanimated';
+
+interface Emergency {
+  id: string;
+  coordinate: LatLng;
+  title: string;
+  description: string;
+  type: 'medical' | 'fire' | 'police';
+  distance: number;
+  confirmed?: boolean;
+}
+
+// Calculate distance between two coordinates in meters
+const calculateDistance = (coord1: LatLng, coord2: LatLng): number => {
+  const R = 6371e3; // Earth's radius in meters
+  const φ1 = (coord1.latitude * Math.PI) / 180;
+  const φ2 = (coord2.latitude * Math.PI) / 180;
+  const Δφ = ((coord2.latitude - coord1.latitude) * Math.PI) / 180;
+  const Δλ = ((coord2.longitude - coord1.longitude) * Math.PI) / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) *
+    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+};
+
+// Function to generate random coordinates with some close and some far
+const generateRandomNearbyLocation = (center: LatLng, index: number): LatLng => {
+  const isNearby = index < 2; // Make first 2 emergencies nearby
+  const maxRadius = isNearby ? 100 : 500; // 100m for nearby, 500m for far
+  const radiusInDegrees = maxRadius / 111320;
+
+  const randomAngle = Math.random() * 2 * Math.PI;
+  const randomRadius = (isNearby ? 0.3 : 0.7) * radiusInDegrees + (Math.random() * 0.3 * radiusInDegrees);
+
+  const latOffset = randomRadius * Math.cos(randomAngle);
+  const lonOffset = randomRadius * Math.sin(randomAngle);
+
+  return {
+    latitude: center.latitude + latOffset,
+    longitude: center.longitude + lonOffset,
+  };
+};
+
+const emergencyTypes: Emergency['type'][] = ['medical', 'fire', 'police'];
+
+// Function to generate random emergency data around a location
+const generateEmergencyData = (center: LatLng): Emergency[] => {
+  return Array.from({ length: 5 }, (_, i) => {
+    const coordinate = generateRandomNearbyLocation(center, i);
+    const distance = calculateDistance(center, coordinate);
+    return {
+      id: (i + 1).toString(),
+      coordinate,
+      title: `${emergencyTypes[i % 3]} Emergency`,
+      description: `${emergencyTypes[i % 3]} emergency ${Math.round(distance)}m away`,
+      type: emergencyTypes[i % 3],
+      distance,
+      confirmed: false,
+    };
+  });
+};
+
+interface NearbyAlertsProps {
+  emergencies: Emergency[];
+  userLocation: LatLng;
+  onConfirm: (emergencyId: string) => void;
+}
+
+const getEmergencyIcon = (type: Emergency['type']) => {
+  switch (type) {
+    case 'medical':
+      return <FontAwesome5 name="hospital-symbol" size={20} color="#FF0000" />;
+    case 'fire':
+      return <MaterialIcons name="local-fire-department" size={24} color="#FF6B00" />;
+    case 'police':
+      return <MaterialIcons name="local-police" size={24} color="#0066FF" />;
+    default:
+      return null;
+  }
+};
+
+const NearbyAlerts: React.FC<NearbyAlertsProps> = ({ emergencies, onConfirm }) => {
+  const nearbyEmergencies = emergencies.filter(e => e.distance <= 100 && !e.confirmed);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const contentHeight = useSharedValue('auto');
+  const rotateAnimation = useSharedValue(0);
+  
+  if (nearbyEmergencies.length === 0) return null;
+
+  const toggleMinimize = () => {
+    setIsMinimized(!isMinimized);
+    rotateAnimation.value = withSpring(isMinimized ? 0 : 180);
+  };
+
+  const rotateStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ rotate: `${rotateAnimation.value}deg` }],
+    };
+  });
+
+  return (
+    <View style={styles.alertsContainer}>
+      <View style={styles.alertsHeaderContainer}>
+        <View>
+          <Text style={styles.alertsTitle}>🚨 Nearby Emergencies</Text>
+          <Text style={styles.alertsSubtitle}>
+            {nearbyEmergencies.length} {nearbyEmergencies.length === 1 ? 'alert' : 'alerts'} nearby
+          </Text>
+        </View>
+        <TouchableOpacity onPress={toggleMinimize} style={styles.minimizeButton}>
+          <Animated.Text style={[styles.minimizeIcon, rotateStyle]}>▼</Animated.Text>
+        </TouchableOpacity>
+      </View>
+      <Animated.View layout={Layout}>
+        {!isMinimized && nearbyEmergencies.map(emergency => (
+          <View key={emergency.id} style={styles.alertItem}>
+            <View style={styles.alertInfo}>
+              <View style={styles.alertTitleContainer}>
+                {getEmergencyIcon(emergency.type)}
+                <Text style={[styles.alertTitle, { marginLeft: 8 }]}>
+                  {emergency.title.replace(emergency.type, '').trim()}
+                </Text>
+              </View>
+              <Text style={styles.alertDistance}>{Math.round(emergency.distance)}m away</Text>
+            </View>
+            <View style={styles.alertActions}>
+              <TouchableOpacity
+                style={[styles.confirmButton, { backgroundColor: getMarkerColor(emergency.type) }]}
+                onPress={() => onConfirm(emergency.id)}
+              >
+                <Text style={styles.confirmButtonText}>Confirm</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity>
+                <Text>Can't Confirm</Text>
+            </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+      </Animated.View>
+    </View>
+  );
+};
+
+interface AnimatedMarkerProps {
+  coordinate: LatLng;
+  type: Emergency['type'];
+  title: string;
+  description: string;
+}
+
+const getMarkerColor = (type: Emergency['type']): string => {
+  switch (type) {
+    case 'medical':
+      return '#FF0000'; // Red
+    case 'fire':
+      return '#FF6B00'; // Orange
+    case 'police':
+      return '#0066FF'; // Blue
+    default:
+      return '#FF0000';
+  }
+};
+
+const AnimatedMarker: React.FC<AnimatedMarkerProps> = ({ coordinate, type, title, description }) => {
+  const scale = useSharedValue(1);
+  const [isCalloutVisible, setIsCalloutVisible] = useState(false);
+
+  useEffect(() => {
+    scale.value = withRepeat(
+      withSequence(
+        withTiming(1.2, { duration: 500 }),
+        withTiming(1, { duration: 500 }),
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: scale.value }],
+    };
+  });
+
+  const markerColor = getMarkerColor(type);
+
+  return (
+    <Marker 
+      coordinate={coordinate}
+      onPress={() => setIsCalloutVisible(true)}
+    >
+      <View style={styles.markerContainer}>
+        <Animated.View 
+          style={[
+            styles.marker, 
+            animatedStyle, 
+            { 
+              backgroundColor: `${markerColor}50`,
+              borderColor: markerColor,
+            }
+          ]} 
+        />
+      </View>
+      {isCalloutVisible && (
+        <Callout 
+          tooltip
+          onPress={() => setIsCalloutVisible(false)}
+        >
+          <View style={[styles.calloutContainer, { borderColor: markerColor }]}>
+            <View style={[styles.calloutHeader, { backgroundColor: markerColor }]}>
+              <Text style={styles.calloutTitle}>{title}</Text>
+            </View>
+            <View style={styles.calloutBody}>
+              <Text style={styles.calloutDescription}>{description}</Text>
+              <Text style={[styles.calloutType, { color: markerColor }]}>
+                Type: {type.charAt(0).toUpperCase() + type.slice(1)}
+              </Text>
+            </View>
+          </View>
+        </Callout>
+      )}
+    </Marker>
+  );
+};
+
+export default function MapScreen() {
+  const mapRef = useRef<MapView>(null);
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [emergencies, setEmergencies] = useState<Emergency[]>([]);
+
+  const handleConfirmEmergency = (emergencyId: string) => {
+    setEmergencies(prev => 
+      prev.map(emergency => 
+        emergency.id === emergencyId 
+          ? { ...emergency, confirmed: true }
+          : emergency
+      )
+    );
+  };
+
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setErrorMsg('Permission to access location was denied');
+        Alert.alert('Permission Denied', 'Location permission is required to show nearby emergencies.');
+        return;
+      }
+
+      try {
+        const currentLocation = await Location.getCurrentPositionAsync({});
+        setLocation(currentLocation);
+        
+        const newEmergencies = generateEmergencyData({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+        });
+        setEmergencies(newEmergencies);
+
+        mapRef.current?.animateToRegion({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        });
+      } catch (error) {
+        setErrorMsg('Error getting location');
+        Alert.alert('Error', 'Failed to get your current location.');
+      }
+    })();
+  }, []);
+
+  const initialRegion: Region = {
+    latitude: 0,
+    longitude: 0,
+    latitudeDelta: 0.005,
+    longitudeDelta: 0.005,
+  };
+
+  return (
+    <View style={styles.container}>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        initialRegion={initialRegion}
+        provider={PROVIDER_GOOGLE}
+        showsUserLocation
+        showsMyLocationButton
+        showsCompass
+        mapType="standard"
+      >
+        {emergencies.map((emergency) => (
+          <AnimatedMarker
+            key={emergency.id}
+            coordinate={emergency.coordinate}
+            type={emergency.type}
+            title={emergency.title}
+            description={emergency.description}
+          />
+        ))}
+      </MapView>
+      {location && (
+        <NearbyAlerts
+          emergencies={emergencies}
+          userLocation={{
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          }}
+          onConfirm={handleConfirmEmergency}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  map: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  markerContainer: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  marker: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+  },
+  calloutContainer: {
+    width: 200,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    borderWidth: 2,
+    overflow: 'hidden',
+  },
+  calloutHeader: {
+    padding: 8,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+  },
+  calloutTitle: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  calloutBody: {
+    padding: 8,
+    backgroundColor: 'white',
+  },
+  calloutDescription: {
+    fontSize: 12,
+    color: '#333',
+    marginBottom: 4,
+  },
+  calloutType: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  alertsContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+    overflow: 'hidden',
+  },
+  alertsHeaderContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  minimizeButton: {
+    padding: 8,
+  },
+  minimizeIcon: {
+    fontSize: 16,
+    color: '#666',
+  },
+  alertsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  alertsSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  alertItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  alertInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  alertTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  alertActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  alertTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  alertDistance: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  confirmButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+}); 
