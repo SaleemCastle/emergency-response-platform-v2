@@ -93,7 +93,8 @@ interface NearbyAlertsProps {
 }
 
 const getEmergencyIcon = (type: string) => {
-    switch (type) {
+    console.log(type);
+    switch (type.toLowerCase()) {
         case 'medical':
             return <FontAwesome5 name="hospital-symbol" size={20} color="#FF0000" />;
         case 'fire':
@@ -182,7 +183,7 @@ const NearbyAlerts: React.FC<NearbyAlertsProps> = ({ emergencies, userLocation, 
                             </View>
                             <View style={styles.alertActions}>
                                 <TouchableOpacity
-                                    style={[styles.confirmButton, { backgroundColor: getMarkerColor(emergency.type) }]}
+                                    style={[styles.confirmButton, { backgroundColor: getMarkerColor(emergency.severity) }]}
                                     onPress={() => onConfirm(emergency.id)}
                                 >
                                     <Text style={styles.confirmButtonText}>Confirm</Text>
@@ -205,22 +206,24 @@ interface AnimatedMarkerProps {
     type: string;
     title: string;
     description: string;
+    severity: number;
 }
 
-const getMarkerColor = (type: string): string => {
-    switch (type) {
-        case 'medical':
+const getMarkerColor = (severity: number): string => {
+    console.log(severity);
+    switch (severity) {
+        case 3:
             return '#FF0000'; // Red
-        case 'fire':
+        case 2:
             return '#FF6B00'; // Orange
-        case 'police':
+        case 1:
             return '#0066FF'; // Blue
         default:
             return '#FF0000';
     }
 };
 
-const AnimatedMarker: React.FC<AnimatedMarkerProps> = ({ coordinate, type, title, description }) => {
+const AnimatedMarker: React.FC<AnimatedMarkerProps> = ({ coordinate, type, title, description, severity }) => {
     const scale = useSharedValue(1);
     const [isCalloutVisible, setIsCalloutVisible] = useState(false);
 
@@ -241,7 +244,7 @@ const AnimatedMarker: React.FC<AnimatedMarkerProps> = ({ coordinate, type, title
         };
     });
 
-    const markerColor = getMarkerColor(type);
+    const markerColor = getMarkerColor(severity);
 
     return (
         <Marker
@@ -302,7 +305,12 @@ const detectHotspots = (emergencies: EmergencyResponse[], radius: number = 300):
     const hotspots: Hotspot[] = [];
     const processed = new Set<string>();
 
-    emergencies.forEach(emergency => {
+    // filter out emergenices that are not violent in nature or not related to criminal activities
+    const filteredEmergencies = emergencies.filter(emergency => {
+        return emergency.type.toLowerCase() === 'police';
+    });
+
+    filteredEmergencies.forEach(emergency => {
         if (processed.has(emergency.id)) return;
 
         const location = parseLocationString(emergency.location);
@@ -474,6 +482,7 @@ export default function MapScreen() {
                         type={emergency.type}
                         title={emergency.type}
                         description={emergency.description}
+                        severity={emergency.severity}
                     />
                 ))}
             </MapView>
@@ -546,7 +555,7 @@ const styles = StyleSheet.create({
     },
     alertsContainer: {
         position: 'absolute',
-        bottom: 20,
+        bottom: 80,
         left: 20,
         right: 20,
         backgroundColor: 'white',

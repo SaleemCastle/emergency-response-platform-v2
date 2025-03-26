@@ -4,16 +4,17 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Audio } from 'expo-av';
 import { createEmergency } from '../utils/api';
 import * as Location from 'expo-location';
+import { MaterialIcons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
 const maxScale = Math.max(width, height) / 80; // Scale to cover the entire screen
 const COOLDOWN_DURATION = 2000; // 2 seconds cooldown
-const BUTTON_COLOR = '#fb2c36';  // Adding grey color constant
+const BUTTON_COLOR = '#fb5969';  // Adding grey color constant
 const ECHO_COLOR = '#ff3b30';  // Add red color for echo effect
 const MAX_CHARS = 1000;
 const RECORDING_DURATION = 5000; // 5 seconds
 const NUM_BARS = 30; // Number of bars in the waveform
-const MIN_BAR_HEIGHT = 0.2; // Minimum height of a bar as a percentage
+const MIN_BAR_HEIGHT = 0.9; // Minimum height of a bar as a percentage
 
 // Recording configuration
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
@@ -660,9 +661,11 @@ const AlertScreen = () => {
             delayLongPress={1000}
             disabled={isButtonDisabled}
           >
-            <Text style={[styles.buttonText, isButtonDisabled && styles.disabledText]}>
+            {/* <Text style={[styles.buttonText, isButtonDisabled && styles.disabledText]}>
               {isButtonDisabled ? 'PLEASE WAIT...' : (showOptions ? 'CANCEL' : 'REPORT\nEMERGENCY')}
-            </Text>
+            </Text> */}
+
+            <MaterialIcons name='touch-app' size={48} color='#fff' />  
           </TouchableOpacity>
         </Animated.View>
 
@@ -778,7 +781,7 @@ const styles = StyleSheet.create({
   emergencyButton: {
     width: 160,
     height: 160,
-    backgroundColor: BUTTON_COLOR,  // Changed to grey
+    backgroundColor: BUTTON_COLOR,
     borderRadius: 80,
     justifyContent: 'center',
     alignItems: 'center',

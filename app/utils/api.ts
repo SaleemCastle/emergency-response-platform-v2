@@ -14,9 +14,10 @@ export interface EmergencyResponse {
   type: string;
   location: string;
   description: string;
-  photoUrl?: string;
+  mediaUrl?: string;
   status: string;
   timestamp: string;
+  severity: number;
   user: User;
 }
 
@@ -34,15 +35,43 @@ export async function createEmergency(emergency: Emergency) {
       throw new Error('User ID not found. Please sign in again.');
     }
 
+    // Create FormData object
+    const formData = new FormData();
+    
+    // Add all emergency data as form fields
+    formData.append('userId', userId);
+    formData.append('type', emergency.type);
+    formData.append('location', emergency.location);
+    formData.append('description', emergency.description);
+
+    // If there's a photo/recording URL (from emergency.photoUrl), add it as media
+    if (emergency.photoUrl) {
+      // Get the file extension from the URI
+      const uriParts = emergency.photoUrl.split('.');
+      const fileType = uriParts[uriParts.length - 1];
+
+      // Create appropriate mime type based on file type
+      let mimeType: string;
+      if (emergency.type === 'VOICE') {
+        mimeType = 'audio/m4a';  // For voice recordings
+      } else {
+        mimeType = `image/${fileType}`;  // For images
+      }
+
+      formData.append('media', {
+        uri: emergency.photoUrl,
+        name: `emergency-media.${fileType}`,
+        type: mimeType,
+      } as any);
+    }
+
     const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/emergencies`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        // Note: Don't set Content-Type header, it will be automatically set with boundary
       },
-      body: JSON.stringify({
-        ...emergency,
-        userId,
-      }),
+      body: formData,
     });
 
     if (!response.ok) {
