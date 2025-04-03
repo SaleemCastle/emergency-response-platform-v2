@@ -5,7 +5,7 @@ export interface Emergency {
   type: string;
   location: string;
   description: string;
-  photoUrl?: string;
+  mediaUrl?: string;
 }
 
 export interface EmergencyResponse {
@@ -31,63 +31,74 @@ export interface User {
 export async function createEmergency(emergency: Emergency) {
   try {
     const userId = await SecureStore.getItemAsync('userId');
+    const pushToken = await SecureStore.getItemAsync('expoPushToken');
+    
     if (!userId) {
       throw new Error('User ID not found. Please sign in again.');
     }
 
-    // Create FormData object
-    const formData = new FormData();
-    
-    // Add all emergency data as form fields
-    formData.append('userId', userId);
-    formData.append('type', emergency.type);
-    formData.append('location', emergency.location);
-    formData.append('description', emergency.description);
+    // If there's a photo/recording URL, use FormData
+    if (emergency.mediaUrl) {
+      const formData = new FormData();
+      
+      formData.append('userId', userId);
+      formData.append('type', emergency.type);
+      formData.append('location', emergency.location);
+      formData.append('description', emergency.description);
+      formData.append('expoPushToken', pushToken || '');
 
-    // If there's a photo/recording URL (from emergency.photoUrl), add it as media
-    if (emergency.photoUrl) {
-      // Get the file extension from the URI
-      const uriParts = emergency.photoUrl.split('.');
+      // Handle media file
+      const uriParts = emergency.mediaUrl.split('.');
       const fileType = uriParts[uriParts.length - 1];
 
-      // Create appropriate mime type based on file type
-      let mimeType: string;
-      if (emergency.type === 'VOICE') {
-        mimeType = 'audio/m4a';  // For voice recordings
-      } else {
-        mimeType = `image/${fileType}`;  // For images
-      }
+      const mimeType = emergency.type === 'VOICE' ? 'audio/m4a' : `image/${fileType}`;
 
       formData.append('media', {
-        uri: emergency.photoUrl,
+        uri: emergency.mediaUrl,
         name: `emergency-media.${fileType}`,
         type: mimeType,
       } as any);
+
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/emergencies`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create emergency');
+      }
+
+      const createdEmergency = await response.json();
+      socketManager.getSocket()?.emit('newEmergency', createdEmergency);
+      return createdEmergency;
+
+    } else {
+      // For emergencies without media, use regular JSON
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/emergencies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          type: emergency.type,
+          location: emergency.location,
+          description: emergency.description,
+          expoPushToken: pushToken,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create emergency');
+      }
+
+      const createdEmergency = await response.json();
+      socketManager.getSocket()?.emit('newEmergency', createdEmergency);
+      return createdEmergency;
     }
 
-    const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/emergencies`, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        // Note: Don't set Content-Type header, it will be automatically set with boundary
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create emergency');
-    }
-
-    const createdEmergency = await response.json();
-
-    // Get socket instance and emit event if socket is connected
-    const socket = socketManager.getSocket();
-    if (socket?.connected) {
-      socket.emit('newEmergency', createdEmergency);
-    }
-
-    return createdEmergency;
   } catch (error) {
     console.error('Error creating emergency:', error);
     throw error;
@@ -142,4 +153,27 @@ export async function confirmEmergency(emergencyId: string) {
 
 export async function getUserId(): Promise<string | null> {
   return await SecureStore.getItemAsync('userId');
+}
+
+export async function getUserByEmail(email: string): Promise<User> {
+  try {
+    const response = await fetch(
+      `${process.env.EXPO_PUBLIC_API_URL}/api/user/email/${encodeURIComponent(email)}`
+    );
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch user');
+    }
+
+    const user = await response.json();
+    
+    // Store the user ID in SecureStore
+    await SecureStore.setItemAsync('userId', user.id);
+    
+    return user;
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    throw error;
+  }
 } 

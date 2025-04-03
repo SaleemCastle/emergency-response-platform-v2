@@ -2,6 +2,7 @@ import { useSignIn } from '@clerk/clerk-expo'
 import { Link, useRouter } from 'expo-router'
 import { Text, TextInput, TouchableOpacity, View, StyleSheet, ActivityIndicator } from 'react-native'
 import React, { useState } from 'react'
+import { getUserByEmail } from '../utils/api'
 
 export default function SignInScreen() {
   const { signIn, setActive, isLoaded } = useSignIn()
@@ -25,8 +26,15 @@ export default function SignInScreen() {
       })
 
       if (signInAttempt.status === 'complete') {
-        await setActive({ session: signInAttempt.createdSessionId })
-        router.replace('/(tabs)/explore')
+        try {
+          await getUserByEmail(emailAddress);
+          
+          await setActive({ session: signInAttempt.createdSessionId })
+          router.replace('/(tabs)/explore')
+        } catch (userError) {
+          console.error('Error fetching user data:', userError);
+          setError('Successfully signed in but failed to fetch user data. Please try again.');
+        }
       } else {
         setError('Sign in failed. Please try again.')
         console.error(JSON.stringify(signInAttempt, null, 2))

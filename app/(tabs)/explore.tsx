@@ -529,7 +529,7 @@ const AlertScreen = () => {
                         type: 'VOICE',
                         location: location,
                         description: 'Voice recording emergency report',
-                        photoUrl: uri,
+                        mediaUrl: uri,
                       });
 
                       console.log('Emergency created:', emergency);

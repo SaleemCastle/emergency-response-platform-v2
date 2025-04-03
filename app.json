@@ -50,10 +50,26 @@
         }
       ],
       "expo-location",
-      "expo-audio"
+      "expo-audio",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/safezone_push_notif_icon.png",
+          "color": "#ffffff",
+          "sounds": ["./assets/audio/push_notif_sound.wav"],
+          "vibrate": true,
+          "channelId": "emergency-alerts",
+          "name": "SafeZone Alerts"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0e8a8944-2941-44b2-aab3-439d6a166a53"
+      }
     }
   }
 }
